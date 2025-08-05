@@ -9,8 +9,17 @@ class InfinityCube {
         this.animationId = null;
         this.isAnimating = true;
         this.animationSpeed = 1;
-        this.cubeSize = 1;
-        this.foldAnimation = { active: false, progress: 0, direction: 1 };
+        this.cubeSize = 0.8;
+        
+        // Infinity cube specific properties
+        this.cubeGroups = [];
+        this.currentFlipGroup = 0;
+        this.isFlipping = false;
+        this.flipProgress = 0;
+        this.flipSpeed = 0.02;
+        this.flipAxis = 'x';
+        this.flipDelay = 60; // frames to wait between flips
+        this.flipDelayCounter = 0;
         
         this.init();
         this.createInfinityCube();
@@ -82,63 +91,129 @@ class InfinityCube {
     }
     
     createInfinityCube() {
-        // Clear existing cubes
+        // Clear existing cubes and groups
         this.cubes.forEach(cube => this.scene.remove(cube.group));
+        this.cubeGroups.forEach(group => this.scene.remove(group));
         this.cubes = [];
         this.hinges = [];
+        this.cubeGroups = [];
         
         // Create materials with different colors for each face
         const materials = this.createCubeMaterials();
         
-        // Create 8 interconnected cubes in a 2x2x2 formation
-        const positions = [
-            { x: -1, y: -1, z: -1 }, // Bottom layer
-            { x: 1, y: -1, z: -1 },
-            { x: -1, y: -1, z: 1 },
-            { x: 1, y: -1, z: 1 },
-            { x: -1, y: 1, z: -1 },  // Top layer
-            { x: 1, y: 1, z: -1 },
-            { x: -1, y: 1, z: 1 },
-            { x: 1, y: 1, z: 1 }
+        // Create two groups of 4 cubes each (2x2 formation)
+        // Group 1: Front 4 cubes
+        // Group 2: Back 4 cubes
+        
+        const group1 = new THREE.Group();
+        const group2 = new THREE.Group();
+        
+        // Positions for the first group (front 2x2 layer)
+        const group1Positions = [
+            { x: -0.5, y: -0.5, z: 0.5 },
+            { x: 0.5, y: -0.5, z: 0.5 },
+            { x: -0.5, y: 0.5, z: 0.5 },
+            { x: 0.5, y: 0.5, z: 0.5 }
         ];
         
-        positions.forEach((pos, index) => {
-            const cubeGroup = new THREE.Group();
-            
-            // Create individual cube
-            const geometry = new THREE.BoxGeometry(this.cubeSize, this.cubeSize, this.cubeSize);
-            const cube = new THREE.Mesh(geometry, materials);
-            cube.castShadow = true;
-            cube.receiveShadow = true;
-            
-            // Add edges for more definition
-            const edges = new THREE.EdgesGeometry(geometry);
-            const edgeMaterial = new THREE.LineBasicMaterial({ color: 0x000000, linewidth: 2 });
-            const wireframe = new THREE.LineSegments(edges, edgeMaterial);
-            
-            cubeGroup.add(cube);
-            cubeGroup.add(wireframe);
-            cubeGroup.position.set(pos.x * this.cubeSize, pos.y * this.cubeSize, pos.z * this.cubeSize);
-            
-            // Add hinge points for folding animation
-            const hingeGeometry = new THREE.SphereGeometry(0.05, 8, 8);
-            const hingeMaterial = new THREE.MeshPhongMaterial({ color: 0x333333 });
-            const hinge = new THREE.Mesh(hingeGeometry, hingeMaterial);
-            cubeGroup.add(hinge);
-            
-            this.scene.add(cubeGroup);
-            this.cubes.push({
-                group: cubeGroup,
-                mesh: cube,
-                wireframe: wireframe,
-                hinge: hinge,
-                originalPosition: { ...pos },
-                index: index
-            });
+        // Positions for the second group (back 2x2 layer)
+        const group2Positions = [
+            { x: -0.5, y: -0.5, z: -0.5 },
+            { x: 0.5, y: -0.5, z: -0.5 },
+            { x: -0.5, y: 0.5, z: -0.5 },
+            { x: 0.5, y: 0.5, z: -0.5 }
+        ];
+        
+        // Create cubes for group 1
+        group1Positions.forEach((pos, index) => {
+            const cube = this.createSingleCube(materials, pos);
+            group1.add(cube.group);
+            this.cubes.push(cube);
         });
         
-        // Create connecting elements (representing the tape/hinges)
-        this.createConnections();
+        // Create cubes for group 2
+        group2Positions.forEach((pos, index) => {
+            const cube = this.createSingleCube(materials, pos);
+            group2.add(cube.group);
+            this.cubes.push(cube);
+        });
+        
+        // Position the groups so they form a 2x2x2 cube initially
+        group1.position.set(0, 0, 0);
+        group2.position.set(0, 0, 0);
+        
+        this.scene.add(group1);
+        this.scene.add(group2);
+        
+        this.cubeGroups = [group1, group2];
+        
+        // Create hinge visualization
+        this.createHingeVisualization();
+    }
+    
+    createSingleCube(materials, position) {
+        const cubeGroup = new THREE.Group();
+        
+        // Create individual cube
+        const geometry = new THREE.BoxGeometry(this.cubeSize, this.cubeSize, this.cubeSize);
+        const cube = new THREE.Mesh(geometry, materials);
+        cube.castShadow = true;
+        cube.receiveShadow = true;
+        
+        // Add edges for more definition
+        const edges = new THREE.EdgesGeometry(geometry);
+        const edgeMaterial = new THREE.LineBasicMaterial({ color: 0x000000, linewidth: 2 });
+        const wireframe = new THREE.LineSegments(edges, edgeMaterial);
+        
+        cubeGroup.add(cube);
+        cubeGroup.add(wireframe);
+        cubeGroup.position.set(
+            position.x * this.cubeSize, 
+            position.y * this.cubeSize, 
+            position.z * this.cubeSize
+        );
+        
+        return {
+            group: cubeGroup,
+            mesh: cube,
+            wireframe: wireframe,
+            originalPosition: { ...position }
+        };
+    }
+    
+    createHingeVisualization() {
+        // Create visual hints for hinge axes
+        const hingeGeometry = new THREE.CylinderGeometry(0.02, 0.02, this.cubeSize * 2.2);
+        const hingeMaterial = new THREE.MeshPhongMaterial({ 
+            color: 0xff0000, 
+            transparent: true, 
+            opacity: 0.6 
+        });
+        
+        // X-axis hinge
+        const hingeX = new THREE.Mesh(hingeGeometry, hingeMaterial);
+        hingeX.rotation.z = Math.PI / 2;
+        hingeX.position.set(0, 0, 0);
+        
+        // Y-axis hinge
+        const hingeY = new THREE.Mesh(hingeGeometry, hingeMaterial.clone());
+        hingeY.material.color.setHex(0x00ff00);
+        hingeY.position.set(0, 0, 0);
+        
+        // Z-axis hinge
+        const hingeZ = new THREE.Mesh(hingeGeometry, hingeMaterial.clone());
+        hingeZ.material.color.setHex(0x0000ff);
+        hingeZ.rotation.x = Math.PI / 2;
+        hingeZ.position.set(0, 0, 0);
+        
+        this.scene.add(hingeX);
+        this.scene.add(hingeY);
+        this.scene.add(hingeZ);
+        
+        this.hinges = [hingeX, hingeY, hingeZ];
+        
+        // Initially hide hinges
+        this.hinges.forEach(hinge => hinge.visible = false);
     }
     
     createCubeMaterials() {
@@ -162,47 +237,8 @@ class InfinityCube {
     }
     
     createConnections() {
-        // Create visible connections between adjacent cubes
-        const connectionMaterial = new THREE.MeshPhongMaterial({
-            color: 0x333333,
-            transparent: true,
-            opacity: 0.8
-        });
-        
-        // Define which cubes are connected (like tape hinges in real infinity cube)
-        const connections = [
-            [0, 1], [0, 2], [0, 4], // Bottom-front-left connections
-            [1, 3], [1, 5], // Bottom-front-right connections
-            [2, 3], [2, 6], // Bottom-back connections
-            [3, 7], // Bottom-back-right
-            [4, 5], [4, 6], // Top connections
-            [5, 7], [6, 7] // Top-back connections
-        ];
-        
-        connections.forEach(([i, j]) => {
-            const cube1 = this.cubes[i];
-            const cube2 = this.cubes[j];
-            
-            const distance = cube1.group.position.distanceTo(cube2.group.position);
-            const geometry = new THREE.CylinderGeometry(0.02, 0.02, distance * 0.8);
-            const connection = new THREE.Mesh(geometry, connectionMaterial);
-            
-            // Position connection between cubes
-            const midpoint = new THREE.Vector3()
-                .addVectors(cube1.group.position, cube2.group.position)
-                .multiplyScalar(0.5);
-            connection.position.copy(midpoint);
-            
-            // Orient connection
-            const direction = new THREE.Vector3()
-                .subVectors(cube2.group.position, cube1.group.position)
-                .normalize();
-            connection.lookAt(cube2.group.position);
-            connection.rotateX(Math.PI / 2);
-            
-            this.scene.add(connection);
-            this.hinges.push(connection);
-        });
+        // This method is now simplified since connections are handled by the group structure
+        // We can add visual tape/hinge connections if desired
     }
     
     setupControls() {
@@ -229,20 +265,20 @@ class InfinityCube {
             this.controls.reset();
         });
         
-        // Wireframe toggle
+        // Wireframe toggle (now toggles hinge visualization)
         document.getElementById('toggleWireframe').addEventListener('click', () => {
-            this.cubes.forEach(cube => {
-                cube.wireframe.visible = !cube.wireframe.visible;
+            this.hinges.forEach(hinge => {
+                hinge.visible = !hinge.visible;
             });
         });
         
         // Fold animation
         document.getElementById('foldCube').addEventListener('click', () => {
-            this.startFoldAnimation(1);
+            this.startFlip();
         });
         
         document.getElementById('unfoldCube').addEventListener('click', () => {
-            this.startFoldAnimation(-1);
+            this.resetCube();
         });
         
         // Mouse interaction
@@ -286,42 +322,100 @@ class InfinityCube {
         }, 200);
     }
     
-    startFoldAnimation(direction) {
-        if (this.foldAnimation.active) return;
-        
-        this.foldAnimation.active = true;
-        this.foldAnimation.direction = direction;
-        this.foldAnimation.progress = direction > 0 ? 0 : 1;
+    startFlip() {
+        if (!this.isFlipping) {
+            this.isFlipping = true;
+            this.flipProgress = 0;
+            this.flipDelayCounter = 0;
+            
+            // Alternate between different flip axes and groups
+            const axes = ['x', 'y', 'z'];
+            this.flipAxis = axes[Math.floor(Math.random() * axes.length)];
+            this.currentFlipGroup = (this.currentFlipGroup + 1) % 2;
+        }
     }
     
-    updateFoldAnimation() {
-        if (!this.foldAnimation.active) return;
-        
-        const speed = 0.02;
-        this.foldAnimation.progress += this.foldAnimation.direction * speed;
-        
-        if (this.foldAnimation.direction > 0 && this.foldAnimation.progress >= 1) {
-            this.foldAnimation.progress = 1;
-            this.foldAnimation.active = false;
-        } else if (this.foldAnimation.direction < 0 && this.foldAnimation.progress <= 0) {
-            this.foldAnimation.progress = 0;
-            this.foldAnimation.active = false;
+    resetCube() {
+        // Reset all rotations
+        this.cubeGroups.forEach(group => {
+            group.rotation.set(0, 0, 0);
+        });
+        this.isFlipping = false;
+        this.flipProgress = 0;
+    }
+    
+    updateInfinityCubeAnimation() {
+        if (!this.isFlipping) {
+            // Auto-flip delay
+            this.flipDelayCounter++;
+            if (this.flipDelayCounter >= this.flipDelay && this.isAnimating) {
+                this.startFlip();
+            }
+            return;
         }
         
-        // Apply folding transformation
-        this.cubes.forEach((cube, index) => {
-            const t = this.foldAnimation.progress;
-            const angle = t * Math.PI * 0.5;
-            
-            // Different folding patterns for different cubes
-            if (index % 2 === 0) {
-                cube.group.rotation.x = Math.sin(angle) * 0.5;
-                cube.group.rotation.y = Math.cos(angle) * 0.3;
-            } else {
-                cube.group.rotation.z = Math.sin(angle) * 0.4;
-                cube.group.rotation.x = Math.cos(angle) * 0.2;
-            }
-        });
+        // Update flip progress
+        this.flipProgress += this.flipSpeed * this.animationSpeed;
+        
+        if (this.flipProgress >= 1) {
+            this.flipProgress = 1;
+            this.isFlipping = false;
+            this.flipDelayCounter = 0;
+        }
+        
+        // Apply easing (smooth in/out)
+        const easedProgress = this.easeInOutCubic(this.flipProgress);
+        const angle = easedProgress * Math.PI; // 180 degrees
+        
+        // Apply rotation to the current flip group
+        const group = this.cubeGroups[this.currentFlipGroup];
+        
+        switch (this.flipAxis) {
+            case 'x':
+                group.rotation.x = angle;
+                break;
+            case 'y':
+                group.rotation.y = angle;
+                break;
+            case 'z':
+                group.rotation.z = angle;
+                break;
+        }
+        
+        // When flip is complete, rearrange the cube structure
+        if (this.flipProgress >= 1) {
+            this.rearrangeCubeStructure();
+        }
+    }
+    
+    easeInOutCubic(t) {
+        return t < 0.5 ? 4 * t * t * t : (t - 1) * (2 * t - 2) * (2 * t - 2) + 1;
+    }
+    
+    rearrangeCubeStructure() {
+        // After a flip, we need to rearrange the cube structure
+        // This simulates the infinity cube's continuous folding behavior
+        
+        // Reset rotation and apply new positions
+        const group = this.cubeGroups[this.currentFlipGroup];
+        group.rotation.set(0, 0, 0);
+        
+        // Randomly offset the group slightly to create the infinity effect
+        const offset = 0.1;
+        switch (this.flipAxis) {
+            case 'x':
+                group.position.x += (Math.random() - 0.5) * offset;
+                break;
+            case 'y':
+                group.position.y += (Math.random() - 0.5) * offset;
+                break;
+            case 'z':
+                group.position.z += (Math.random() - 0.5) * offset;
+                break;
+        }
+        
+        // Gradually return to center
+        group.position.lerp(new THREE.Vector3(0, 0, 0), 0.1);
     }
     
     animate() {
@@ -330,24 +424,15 @@ class InfinityCube {
         if (this.isAnimating) {
             const time = Date.now() * 0.001 * this.animationSpeed;
             
-            // Rotate individual cubes
-            this.cubes.forEach((cube, index) => {
-                if (!this.foldAnimation.active) {
-                    cube.group.rotation.x = Math.sin(time + index) * 0.1;
-                    cube.group.rotation.y = Math.cos(time + index * 0.5) * 0.1;
-                    cube.group.rotation.z = Math.sin(time * 0.7 + index * 0.3) * 0.05;
-                }
-                
-                // Subtle floating animation
-                cube.group.position.y = cube.originalPosition.y * this.cubeSize + Math.sin(time * 2 + index) * 0.02;
-            });
+            // Subtle floating animation for the entire cube assembly
+            this.scene.position.y = Math.sin(time * 0.5) * 0.1;
             
-            // Rotate the entire cube assembly
-            this.scene.rotation.y = time * 0.1;
+            // Gentle rotation of the entire scene for better viewing
+            this.scene.rotation.y += 0.005 * this.animationSpeed;
         }
         
-        // Update fold animation
-        this.updateFoldAnimation();
+        // Update infinity cube flip animation
+        this.updateInfinityCubeAnimation();
         
         // Update controls
         this.controls.update();
@@ -369,7 +454,13 @@ class InfinityCube {
         
         // Clean up Three.js objects
         this.cubes.forEach(cube => {
-            this.scene.remove(cube.group);
+            if (cube.group.parent) {
+                cube.group.parent.remove(cube.group);
+            }
+        });
+        
+        this.cubeGroups.forEach(group => {
+            this.scene.remove(group);
         });
         
         this.hinges.forEach(hinge => {
